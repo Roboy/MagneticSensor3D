@@ -1,10 +1,10 @@
 #include <Wire.h>    
- 
-#define disk1 0x50
- 
+  
 void setup(void)
 {
+ // start serial 
   Serial.begin(115200);
+ // start wire - make sure you are powering the sensor with 3.3V, SCL and SDA are connected
   Wire.begin();  
   Serial.println("activating sensor");
   activateTLV(0b1011110, 0b00000101);
@@ -25,9 +25,13 @@ void loop(){
  
 void activateTLV(int deviceaddress, byte data) 
 {
+ // this will tell the sensor we want to write to it
   Wire.beginTransmission(deviceaddress);
+ // writing a 0 activates the sensor
   Wire.write(0);
+ // the next byte is the configuration 
   Wire.write(data);
+ // end transmission
   Wire.endTransmission();
  
   delay(5);
