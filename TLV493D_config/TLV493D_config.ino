@@ -1,27 +1,34 @@
 #include <Wire.h>    
 
-byte deviceaddress = 0b1011110;
-int devicepin = 255;
+#define ndevices 2
+
+byte deviceaddress[ndevices] = {0b1011110, 0b0001111};
+int devicepin[ndevices] = {31,30};
   
 void setup(void)
 {
-  byte cfgdata[3];
-  byte* factory_settings;
-  byte deviceaddress = 0b1011110;
-  int devicepin = 255;
- // start serial 
-  Serial.begin(115200);
- // start wire - make sure you are powering the sensor with 3.3V, SCL and SDA are connected
-  Wire.begin();  
-  Serial.println("---------Activating sensor---------");
-  factory_settings = initTLV(deviceaddress, cfgdata, devicepin);
+  byte initcfg[3];
+  byte* factory_settings[ndevices];
+  for (int i = 0; i < ndevices; i++){    // Activate high current outputs to power the sensors
+    if (devicepin[i] != 255){                     // Not if it already is being powered
+      pinMode(devicepin[i], OUTPUT);              // Be careful, use a level converter or a device with 3V3 outputs <- Lol fuck this guy
+    }
+  }
+  
+  Serial.begin(115200);                           // Start serial coms
+  Wire.begin();                                   // Init I2C
+  Serial.println("Ok, initialized I2C bus");
+  Serial.println("---------Activating sensors--------");
+  delay(1);                                       // Letting things settle
+  factory_settings[0] = initTLV(deviceaddress[0], initcfg, devicepin[0]);    // Write device address and initial config
+  factory_settings[1] = initTLV(deviceaddress[1], initcfg, devicepin[1]);
   Serial.println("---------Done configuring---------");
 }
  
 void loop(){
   delay(10);
   uint8_t data[3];
-  readTLV_B_MSB(deviceaddress, data);
+  readTLV_B_MSB(deviceaddress[0], data);
   Serial.print(convertToMilliTesla(data[0]));
   Serial.print("\t");
   Serial.print(convertToMilliTesla(data[1]));
@@ -46,22 +53,25 @@ byte* initTLV(byte deviceaddress, byte* data, int devicepin)
     Serial.print("No device power pin selected, asuming device is on and continuing with the default address: ");
     Serial.print(setaddr,BIN);
     Serial.println(" .");
-    Serial.println("Triggering general reset, to make sure device is configured correctly");
-    Wire.beginTransmission(0);
-    Wire.write(0);
+    Serial.println("Triggering general reset to make sure device is configured correctly");
+    Wire.beginTransmission(0); // Clock in address 0 to reset 'ALL' devices
+    Wire.write(0b11111111);    // Very, very important to keep SDA line up or else address changes to 0b0011111
+    Wire.endTransmission();
     
   }else{
     digitalWrite(devicepin,LOW);  // Make sure device is off
     ADDR_pin = bitRead(deviceaddress,6);
-    IICAddr  = (~bitRead(deviceaddress,4)<<1)|(~bitRead(deviceaddress,2));
-    setaddr  = (ADDR_pin<<6)|(~bitRead(IICAddr,1)<<4)|(1<<3)|(~bitRead(IICAddr,0)<<2)|(~ADDR_pin);
+    IICAddr  = (!bitRead(deviceaddress,4)<<1)|(!bitRead(deviceaddress,2));
+    setaddr  = (ADDR_pin<<6)|(!bitRead(IICAddr,1)<<4)|(1<<3)|(!bitRead(IICAddr,0)<<2)|(1<<1)|(!ADDR_pin);
   }
 
   if (setaddr != deviceaddress){
       Serial.println("Invalid device address! Please check and try again.");
       return NULL;
     }else{
-      Serial.print("Configuring device with address: ");
+      Serial.print("Configuring device on pin ");
+      Serial.print(devicepin);
+      Serial.print(" with address: ");
       Serial.print(setaddr,BIN);
       Serial.print(" (ADDR_pin = ");
       Serial.print(ADDR_pin,BIN);
@@ -73,18 +83,33 @@ byte* initTLV(byte deviceaddress, byte* data, int devicepin)
 
   if (ADDR_pin != 1){
     digitalWrite(SDA,LOW);
+    Serial.print("Activating 'El cacharro' ");
+    Serial.println(devicepin);
     digitalWrite(devicepin,HIGH); // Power on device while SDA low to set ADDR bit to 0
     delay(1);                     // At least during 200us
     digitalWrite(SDA,HIGH);
     defaultaddr = 0b0011111;
   }else{
-    digitalWrite(devicepin,HIGH);
+    if(devicepin != 255){
+      digitalWrite(devicepin,HIGH);
+      Serial.print("Activating 'El cacharro' ");
+      Serial.println(devicepin);
+    }
     delay(1);
     defaultaddr = 0b1011110;
   }
 
   Serial.println("Backing up initial register config");
   int reg = 0;
+//  Serial.println("But first checking correct address by bruteforcing the entire range. Fuck you angry pixies!");
+//  for (byte tmpaddr = 1; tmpaddr <=127; tmpaddr++){
+//    Wire.requestFrom(tmpaddr,(uint8_t) 10);
+//    if(Wire.available()){
+//      Serial.print("Address found: ");
+//      Serial.println(tmpaddr,BIN);
+//      break;
+//    }
+//  }
   Wire.requestFrom(defaultaddr,(uint8_t) 10); // Beginning first read (for backup)
   while(Wire.available()){
     regdata[reg] = Wire.read();
@@ -103,17 +128,17 @@ byte* initTLV(byte deviceaddress, byte* data, int devicepin)
     cfgdata[2] = (0b010<<5)|(regdata[9]&0b11111);             
     // First 3 bits: Enable temp/Low power interval/Parity test
 
-    // Calculate parity bit
-    bool parity = bitRead(cfgdata[0]+cfgdata[1]+cfgdata[2],0);
-    Serial.print("Setting parity bit to ");
-    Serial.println(parity,BIN);
-    bitWrite(cfgdata[0],7,parity);
+    // Calculate parity bit     (well doesen't work for now so fuck it)
+    // bool parity = bitRead(cfgdata[0]+cfgdata[1]+cfgdata[2],0);
+    // Serial.print("Setting parity bit to ");
+    // Serial.println(parity,BIN);
+    // bitWrite(cfgdata[0],7,parity);
 
     // Write config
     Serial.println("Writing config now ...");
-    configureTLV(defaultaddr, cfgdata);
+    configureTLV(defaultaddr, cfgdata, sizeof(cfgdata));
   // End config
-  
+
   Serial.println("Checking new config ...");
   reg = 0;
   Wire.requestFrom(setaddr,(uint8_t) 10);
@@ -130,11 +155,11 @@ byte* initTLV(byte deviceaddress, byte* data, int devicepin)
   return regdata;
 }
 
-void configureTLV(byte deviceaddress, byte* data)
+void configureTLV(byte deviceaddress, byte* data, int count)
 {
   Wire.beginTransmission(deviceaddress);
   Wire.write(0);
-  for (int i = 0; i < sizeof(data)-1; i++){
+  for (int i = 0; i < count; i++){
     Wire.write(data[i]);
   }
   Wire.endTransmission();  
