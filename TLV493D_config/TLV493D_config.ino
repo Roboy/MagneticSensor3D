@@ -1,17 +1,22 @@
 #include <Wire.h>    
 
-#define ndevices 2
-
-byte deviceaddress[ndevices] = {0b1011110, 0b0001111};
-int devicepin[ndevices] = {31,30};
+#define ndevices 3                  // Allways set this first
+                                    
+// Look in the device's user manual for allowed addresses! (Table 6)
+byte deviceaddress[ndevices] = {0b1011110, 0b0001111, 0b0001011};
+int devicepin[ndevices] = {31,35,39};
   
 void setup(void)
 {
   byte initcfg[3];
   byte* factory_settings[ndevices];
-  for (int i = 0; i < ndevices; i++){    // Activate high current outputs to power the sensors
+  pinMode(0,OUTPUT);
+  digitalWrite(0,HIGH);
+
+  for (int i = 0; i < ndevices; i++){             // Activate high current outputs to power the sensors
     if (devicepin[i] != 255){                     // Not if it already is being powered
       pinMode(devicepin[i], OUTPUT);              // Be careful, use a level converter or a device with 3V3 outputs <- Lol fuck this guy
+      digitalWrite(devicepin[i],LOW);             // Make sure device is off
     }
   }
   
@@ -22,18 +27,35 @@ void setup(void)
   delay(1);                                       // Letting things settle
   factory_settings[0] = initTLV(deviceaddress[0], initcfg, devicepin[0]);    // Write device address and initial config
   factory_settings[1] = initTLV(deviceaddress[1], initcfg, devicepin[1]);
+  factory_settings[2] = initTLV(deviceaddress[2], initcfg, devicepin[2]);
   Serial.println("---------Done configuring---------");
 }
  
 void loop(){
   delay(10);
   uint8_t data[3];
+  uint8_t data2[3];
+  uint8_t data3[3];
   readTLV_B_MSB(deviceaddress[0], data);
+  readTLV_B_MSB(deviceaddress[1], data2);
+  readTLV_B_MSB(deviceaddress[2], data3);
   Serial.print(convertToMilliTesla(data[0]));
   Serial.print("\t");
   Serial.print(convertToMilliTesla(data[1]));
   Serial.print("\t");
-  Serial.println(convertToMilliTesla(data[2]));
+  Serial.print(convertToMilliTesla(data[2]));
+  Serial.print("\t");
+  Serial.print(convertToMilliTesla(data2[0]));
+  Serial.print("\t");
+  Serial.print(convertToMilliTesla(data2[1]));
+  Serial.print("\t");
+  Serial.print(convertToMilliTesla(data2[2]));
+  Serial.print("\t");
+  Serial.print(convertToMilliTesla(data3[0]));
+  Serial.print("\t");
+  Serial.print(convertToMilliTesla(data3[1]));
+  Serial.print("\t");
+  Serial.println(convertToMilliTesla(data3[2]));
   }
  
 byte* initTLV(byte deviceaddress, byte* data, int devicepin) 
@@ -59,7 +81,6 @@ byte* initTLV(byte deviceaddress, byte* data, int devicepin)
     Wire.endTransmission();
     
   }else{
-    digitalWrite(devicepin,LOW);  // Make sure device is off
     ADDR_pin = bitRead(deviceaddress,6);
     IICAddr  = (!bitRead(deviceaddress,4)<<1)|(!bitRead(deviceaddress,2));
     setaddr  = (ADDR_pin<<6)|(!bitRead(IICAddr,1)<<4)|(1<<3)|(!bitRead(IICAddr,0)<<2)|(1<<1)|(!ADDR_pin);
@@ -82,12 +103,16 @@ byte* initTLV(byte deviceaddress, byte* data, int devicepin)
   
 
   if (ADDR_pin != 1){
+    Wire.end();
+    pinMode(SDA,OUTPUT);
     digitalWrite(SDA,LOW);
     Serial.print("Activating 'El cacharro' ");
-    Serial.println(devicepin);
+    Serial.print(devicepin);
+    Serial.println(" (SDA Low)");
     digitalWrite(devicepin,HIGH); // Power on device while SDA low to set ADDR bit to 0
     delay(1);                     // At least during 200us
     digitalWrite(SDA,HIGH);
+    Wire.begin();
     defaultaddr = 0b0011111;
   }else{
     if(devicepin != 255){
